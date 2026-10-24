@@ -1,0 +1,7 @@
+server/
+optional-integrations/
+node_modules/
+dist/
+.env
+.env.*
+server/data/

@@ -1,0 +1,5 @@
+ARRAKIS sandbox-only main-file correction
+
+This patch replaces src/main.jsx and src/arrakis-testnet.css. It removes the active import and render references to HyperliquidTestnet so the main frontend no longer requires the Hyperliquid SDK. The optional archived component may remain elsewhere; it is not part of the active import graph.
+
+Install: extract this ZIP directly into C:\Users\johnc\perp-aggregator and choose Replace existing files. Keep server/.env and server/data untouched. Then run npm run build.

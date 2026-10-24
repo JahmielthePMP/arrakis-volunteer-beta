@@ -1,0 +1,35 @@
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+/data/
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+server/data/
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+**/*.db-wal
+**/*.db-shm
+*.log
+server/*.bak*
+server/*-backup.*
+server/ts-resolution.txt
+.vercel/
+# Local backups
+**/*.bak*
+
+# Deferred Hyperliquid wallet integration
+src/HyperliquidTestnet.jsx
+
+# Legacy server files outside the active server directory
+src/index.ts
+src/types.ts
+src/hyperliquid.ts
+/server/src/main.jsx
+/server/src/style.css
+/server/src/arrakis-testnet.css

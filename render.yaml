@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: arrakis-api
+    runtime: node
+    rootDir: server
+    region: frankfurt
+    plan: free
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: 24.21.0
+      - key: ARRAKIS_DATA_DIR
+        value: /tmp/arrakis-data
+      - key: CORS_ORIGINS
+        sync: false
+      - key: ARRAKIS_BETA_ACCESS_CODE
+        sync: false
+      - key: ARRAKIS_AI_PROVIDER
+        value: gemini
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.5-flash-lite
