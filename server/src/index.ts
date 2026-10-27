@@ -1357,13 +1357,24 @@ app.post("/api/risk-assessment", async (req, res) => {
       assumedFeeBps,
       candidateCount: assessments.length,
       eligibleVenueCount: fullyFilledEstimates.length,
-      rankedCandidates: (side === "buy" ? ascending : [...ascending].reverse()).map((entry) => ({ venue: entry.venue, totalCashflow: entry.totalCashflow })),
+      // Never return a candidate ranking when risk/data-quality gates fail.
+      // `totalCashflow` means buy outlay for buys, but net proceeds for sells,
+      // so a sell's max-cashflow venue is not a "lower-cost" venue.
+      rankedCandidates: decisionReady
+        ? (side === "buy" ? ascending : [...ascending].reverse()).map((entry) => ({ venue: entry.venue, totalCashflow: entry.totalCashflow }))
+        : [],
       hyperliquidTotalCashflow: hyperCashflow,
       dydxTotalCashflow: dydxCashflow,
       differenceUsd: absoluteDifference,
-      modelledLowerCostVenue: modelledVenue === "similar_estimated_cost" ? null : best.venue,
-      estimatedLowerCostVenue: decisionReady && modelledVenue !== "similar_estimated_cost" ? best.venue : null,
-      estimatedOutcome: decisionReady ? modelledVenue : "review_required",
+      modelledLowerCostVenue: decisionReady && side === "buy" && modelledVenue !== "similar_estimated_cost" ? best.venue : null,
+      modelledHigherProceedsVenue: decisionReady && side === "sell" && modelledVenue !== "similar_estimated_cost" ? best.venue : null,
+      estimatedLowerCostVenue: decisionReady && side === "buy" && modelledVenue !== "similar_estimated_cost" ? best.venue : null,
+      estimatedHigherProceedsVenue: decisionReady && side === "sell" && modelledVenue !== "similar_estimated_cost" ? best.venue : null,
+      estimatedOutcome: decisionReady
+        ? modelledVenue === "similar_estimated_cost"
+          ? "similar_estimated_cost"
+          : side === "buy" ? "lower_buy_outlay" : "higher_net_sell_proceeds"
+        : "review_required",
       reason: !allRegisteredVenuesFullyCovered ? "At least one registered venue lacks a full-fill estimate." : null,
       note: decisionReady
         ? (side === "buy"
@@ -2307,8 +2318,12 @@ function getAssistantDecisionReadiness(
 
   const comparison = isRecord(latest.comparison) ? latest.comparison : {};
   const decisionReady = comparison.decisionReady === true;
-  const preferredVenue = decisionReady && typeof comparison.estimatedLowerCostVenue === "string"
-    ? comparison.estimatedLowerCostVenue
+  const side = comparison.side === "sell" ? "sell" : "buy";
+  const outcomeVenue = side === "sell"
+    ? comparison.estimatedHigherProceedsVenue
+    : comparison.estimatedLowerCostVenue;
+  const preferredVenue = decisionReady && typeof outcomeVenue === "string"
+    ? outcomeVenue
     : null;
   const reasons: AssistantDecisionReadiness["reasons"] = [];
   const venues = Array.isArray(latest.venues) ? latest.venues : [];
