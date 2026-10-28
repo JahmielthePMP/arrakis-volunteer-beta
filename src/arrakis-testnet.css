@@ -299,3 +299,17 @@
 .beta-access-form button:disabled { opacity: .65; cursor: wait; }
 .beta-access-error { margin: 0; color: #ffaaa3; font-size: 12px; line-height: 1.5; }
 .beta-access-card .beta-access-footnote { margin-top: 22px; font-size: 10px; }
+
+/* Mainnet-shaped test environment: live venue data, simulated execution. */
+.sandbox-environment-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 18px;
+  padding: 16px 18px; border: 1px solid #6b5129; border-radius: 12px;
+  background: linear-gradient(110deg, #1b1710, #111318 72%);
+}
+.sandbox-environment-banner > div { min-width: 0; }
+.sandbox-environment-banner strong { display: block; margin-top: 5px; font-size: 14px; }
+.sandbox-environment-banner p { color: var(--sandbox-muted); margin: 6px 0 0; font-size: 11px; line-height: 1.55; }
+.sandbox-environment-lock { flex: 0 0 auto; border: 1px solid #5d4725; border-radius: 7px; padding: 8px 10px; color: #e3c992; font-size: 9px; font-weight: 850; letter-spacing: .07em; }
+.sandbox-venue-select { max-width: 100%; padding: 8px 10px; border: 1px solid var(--sandbox-line); border-radius: 8px; background: #0b0c0f; color: var(--sandbox-text); font-size: 11px; }
+.sandbox-book-status { display: flex; gap: 7px; flex-wrap: wrap; margin: -4px 0 12px; }
+@media (max-width: 560px) { .sandbox-environment-banner { align-items: flex-start; flex-direction: column; } }
