@@ -497,7 +497,7 @@ async function getHyperliquidOrderBook(
   coin: string,
 ): Promise<OrderBookMetrics> {
   const response = await fetch(
-    "https://api.hyperliquid-testnet.xyz/info",
+    "https://api.hyperliquid.xyz/info",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -731,10 +731,10 @@ const VENUE_ADAPTERS: Record<string, VenueAdapter> = {
   hyperliquid: {
     id: "hyperliquid",
     name: "Hyperliquid",
-    chainId: "hyperliquid-testnet",
+    chainId: "hyperliquid-mainnet",
     chainName: "Hyperliquid",
     chainFamily: "app-specific L1",
-    network: "testnet",
+    network: "mainnet",
     product: "perpetuals",
     supportStatus: "active",
     executionEnabled: false,
@@ -742,7 +742,7 @@ const VENUE_ADAPTERS: Record<string, VenueAdapter> = {
       const markets = await getHyperliquidMarkets();
       return markets.map((market) => ({
         venue: "hyperliquid",
-        network: "testnet",
+        network: "mainnet",
         symbol: market.symbol,
         baseAsset: market.baseAsset,
         quoteAsset: market.quoteAsset ?? "USD",
@@ -938,6 +938,60 @@ app.get("/api/markets", async (req, res) => {
     res.status(502).json({
       error: "Unable to retrieve market data from the requested venues.",
       detail: message,
+    });
+  }
+});
+
+app.get("/api/sandbox/orderbook", async (req, res) => {
+  const parsed = z.object({
+    venue: z.string().trim().min(1).max(80).default("hyperliquid"),
+    symbol: z.string().trim().min(1).max(20).regex(/^[A-Za-z0-9-]+$/).default("SOL"),
+  }).safeParse(req.query);
+
+  if (!parsed.success || !VENUE_ADAPTERS[parsed.data.venue]) {
+    return res.status(400).json({
+      error: "Provide a registered venue and a valid perpetual symbol.",
+      registeredVenues: Object.keys(VENUE_ADAPTERS),
+      executionEnabled: false,
+    });
+  }
+
+  try {
+    const baseAsset = parsed.data.symbol.toUpperCase().split("-")[0];
+    const adapter = VENUE_ADAPTERS[parsed.data.venue];
+    const marketSymbol = adapter.marketSymbolForBase(baseAsset, []);
+    const book = await adapter.fetchOrderBook(baseAsset, marketSymbol);
+
+    if (book.status !== "available") {
+      return res.status(502).json({
+        error: "The selected venue returned no usable perpetual order book.",
+        venue: adapter.id,
+        network: adapter.network,
+        executionEnabled: false,
+      });
+    }
+
+    return res.json({
+      symbol: marketSymbol,
+      venue: adapter.id,
+      network: adapter.network,
+      bids: book.bidsTop5,
+      asks: book.asksTop5,
+      bestBid: book.bestBid,
+      bestAsk: book.bestAsk,
+      spreadBps: book.spreadBps,
+      receivedAt: book.receivedAt,
+      timestampSource: book.timestampSource,
+      snapshotAgeMs: book.snapshotAgeMs,
+      executionEnabled: false,
+      note: "Mainnet perpetual order-book reference for paper trading only. No orders are submitted.",
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown order-book error";
+    return res.status(502).json({
+      error: "Unable to load the selected venue's perpetual order book.",
+      detail: message,
+      executionEnabled: false,
     });
   }
 });

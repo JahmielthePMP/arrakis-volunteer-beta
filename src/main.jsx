@@ -321,7 +321,7 @@ function SolChart({ asset = 'SOL' }) {
         <div>
           <div className="eyebrow">MARKET CHART</div>
           <h2>{asset} / USDT</h2>
-          <p className="muted small">Live spot reference candles · Sandbox settlement</p>
+          <p className="muted small">Spot context chart · Paper execution uses mainnet perp marks</p>
         </div>
 
         <div className="timeframes" aria-label="Chart timeframe">
@@ -1238,33 +1238,36 @@ function useReferencePrices() {
     let cancelled = false
     async function loadPrices() {
       try {
-        const results = await Promise.allSettled(
-          Object.keys(MARKET_ASSETS).map(async (asset) => {
-            const symbol = MARKET_ASSETS[asset].binanceSymbol
-            const response = await fetch(`${BINANCE_SPOT}/ticker/24hr?symbol=${symbol}`)
-            if (!response.ok) throw new Error(`Could not load ${symbol}`)
-            const result = await response.json()
-            const price = Number(result.lastPrice)
-            const bid = Number(result.bidPrice)
-            const ask = Number(result.askPrice)
-            if (!Number.isFinite(price) || price <= 0) throw new Error(`Invalid ${symbol} price`)
-            return [asset, {
-              price,
-              change24h: Number.isFinite(Number(result.priceChangePercent)) ? Number(result.priceChangePercent) : 0,
-              bid: Number.isFinite(bid) ? bid : price,
-              ask: Number.isFinite(ask) ? ask : price,
-            }]
-          }),
-        )
+        const response = await apiFetch(`${API_BASE}/api/markets?venue=all`, { cache: 'no-store' })
+        const result = await response.json().catch(() => null)
+        if (!response.ok) throw new Error(result?.detail || result?.error || `Perpetual market API returned ${response.status}`)
+        const markets = Array.isArray(result?.markets) ? result.markets : []
+        const entries = Object.keys(MARKET_ASSETS).flatMap((asset) => {
+          const candidates = markets.filter((market) =>
+            String(market.baseAsset || '').toUpperCase() === asset &&
+            Number.isFinite(Number(market.markPrice)) && Number(market.markPrice) > 0
+          )
+          const selected = candidates.find((market) => market.venue === 'hyperliquid' && market.network === 'mainnet')
+            || candidates.find((market) => market.network === 'mainnet')
+          if (!selected) return []
+          const price = Number(selected.markPrice)
+          return [[asset, {
+            price,
+            change24h: Number.isFinite(Number(selected.priceChange24h)) ? Number(selected.priceChange24h) : 0,
+            bid: price,
+            ask: price,
+            venue: selected.venue,
+            network: selected.network,
+          }]]
+        })
         if (cancelled) return
-        const entries = results.filter((result) => result.status === 'fulfilled').map((result) => result.value)
-        if (!entries.length) throw new Error('No reference markets returned a valid price')
+        if (!entries.length) throw new Error('No mainnet perpetual markets returned a valid mark price')
         setPrices((previous) => ({ ...previous, USDC: { price: 1, change24h: 0, bid: 1, ask: 1 }, ...Object.fromEntries(entries) }))
-        setStatus(entries.length === Object.keys(MARKET_ASSETS).length ? 'Live reference prices connected' : 'Partial market data connected')
+        setStatus(entries.length === Object.keys(MARKET_ASSETS).length ? 'Mainnet perpetual references connected' : 'Partial mainnet perp data connected')
         setLastUpdated(new Date().toISOString())
       } catch (error) {
-        if (!cancelled) setStatus('Reference prices unavailable · retrying')
-        console.warn('ARRAKIS sandbox price refresh failed:', error)
+        if (!cancelled) setStatus('Mainnet perp data unavailable · retrying')
+        console.warn('ARRAKIS sandbox perp price refresh failed:', error)
       }
     }
     loadPrices()
@@ -1367,55 +1370,69 @@ function AccountBalanceStrip({ account, prices, onClaimFunds }) {
 }
 
 function OrderBookPanel({ asset }) {
-  const [book, setBook] = useState({ bids: [], asks: [] })
-  const [status, setStatus] = useState('Loading order book…')
+  const [venue, setVenue] = useState('hyperliquid')
+  const [book, setBook] = useState({ bids: [], asks: [], bestBid: null, bestAsk: null, spreadBps: null })
+  const [status, setStatus] = useState('Loading mainnet perp book…')
 
   useEffect(() => {
     let cancelled = false
     async function loadBook() {
       try {
-        const symbol = MARKET_ASSETS[asset].binanceSymbol
-        const response = await fetch(`${BINANCE_SPOT}/depth?symbol=${symbol}&limit=5`)
-        if (!response.ok) throw new Error('Order book unavailable')
-        const result = await response.json()
+        setStatus('Refreshing mainnet perp book…')
+        const response = await apiFetch(`${API_BASE}/api/sandbox/orderbook?venue=${venue}&symbol=${asset}`, { cache: 'no-store' })
+        const result = await response.json().catch(() => null)
+        if (!response.ok) throw new Error(result?.detail || result?.error || 'Order book unavailable')
         if (cancelled) return
-        setBook({ bids: result.bids || [], asks: result.asks || [] })
-        setStatus('Live reference depth')
-      } catch {
-        if (!cancelled) setStatus('Order book unavailable')
+        setBook({
+          bids: Array.isArray(result?.bids) ? result.bids : [],
+          asks: Array.isArray(result?.asks) ? result.asks : [],
+          bestBid: result?.bestBid ?? null,
+          bestAsk: result?.bestAsk ?? null,
+          spreadBps: result?.spreadBps ?? null,
+        })
+        setStatus(`${result.network || 'Unknown'} · ${result.venue || venue}`)
+      } catch (error) {
+        if (!cancelled) {
+          setBook({ bids: [], asks: [], bestBid: null, bestAsk: null, spreadBps: null })
+          setStatus(error instanceof Error ? error.message : 'Order book unavailable')
+        }
       }
     }
     loadBook()
     const timer = setInterval(loadBook, 10000)
     return () => { cancelled = true; clearInterval(timer) }
-  }, [asset])
+  }, [asset, venue])
 
   const asks = [...book.asks].reverse()
   const bids = book.bids
-  const bestAsk = book.asks?.[0] ? Number(book.asks[0][0]) : null
-  const bestBid = book.bids?.[0] ? Number(book.bids[0][0]) : null
-  const spread = bestAsk && bestBid ? ((bestAsk - bestBid) / ((bestAsk + bestBid) / 2)) * 10000 : null
+  const bestAsk = book.bestAsk == null ? null : Number(book.bestAsk)
+  const bestBid = book.bestBid == null ? null : Number(book.bestBid)
+  const spread = book.spreadBps == null ? null : Number(book.spreadBps)
 
   return (
     <section className="panel sandbox-orderbook">
       <div className="sandbox-section-heading">
-        <div><div className="eyebrow">MARKET DEPTH</div><h3>Order book</h3></div>
-        <span className="sandbox-muted-pill">{status}</span>
+        <div><div className="eyebrow">MAINNET PERP DEPTH</div><h3>{asset}-PERP order book</h3></div>
+        <select className="sandbox-venue-select" value={venue} onChange={(event) => setVenue(event.target.value)} aria-label="Order book venue">
+          <option value="hyperliquid">Hyperliquid mainnet</option>
+          <option value="dydx">dYdX mainnet</option>
+        </select>
       </div>
-      <div className="sandbox-book-header"><span>Price (USDC)</span><span>Size</span><span>Total</span></div>
+      <div className="sandbox-book-status"><span className="sandbox-muted-pill">{status}</span><span className="sandbox-muted-pill">Read-only feed</span></div>
+      <div className="sandbox-book-header"><span>Price (USD)</span><span>Size</span><span>Total</span></div>
       <div className="sandbox-book-levels sandbox-asks">
-        {asks.map((row, index) => <div className="sandbox-book-row" key={`a-${index}`}><span>{money(Number(row[0]), 2)}</span><span>{tokenAmount(Number(row[1]))}</span><span>{usd(Number(row[0]) * Number(row[1]))}</span></div>)}
-        {!asks.length && <div className="sandbox-empty-line">No ask levels available</div>}
+        {asks.map((row, index) => <div className="sandbox-book-row" key={`a-${index}`}><span>{money(Number(row.price), 2)}</span><span>{tokenAmount(Number(row.size))}</span><span>{usd(Number(row.price) * Number(row.size))}</span></div>)}
+        {!asks.length && <div className="sandbox-empty-line">No ask levels available for this venue/market</div>}
       </div>
       <div className="sandbox-book-mid">
         <strong>{bestAsk != null ? money(bestAsk, 2) : '—'}</strong>
         <span>Spread {spread != null ? `${money(spread, 2)} bps` : '—'}</span>
       </div>
       <div className="sandbox-book-levels sandbox-bids">
-        {bids.map((row, index) => <div className="sandbox-book-row" key={`b-${index}`}><span>{money(Number(row[0]), 2)}</span><span>{tokenAmount(Number(row[1]))}</span><span>{usd(Number(row[0]) * Number(row[1]))}</span></div>)}
-        {!bids.length && <div className="sandbox-empty-line">No bid levels available</div>}
+        {bids.map((row, index) => <div className="sandbox-book-row" key={`b-${index}`}><span>{money(Number(row.price), 2)}</span><span>{tokenAmount(Number(row.size))}</span><span>{usd(Number(row.price) * Number(row.size))}</span></div>)}
+        {!bids.length && <div className="sandbox-empty-line">No bid levels available for this venue/market</div>}
       </div>
-      <p className="sandbox-footnote">Real market reference only. Orders submitted here fill inside the ARRAKIS sandbox, not on Binance.</p>
+      <p className="sandbox-footnote">Live public perpetual order-book data from the selected mainnet venue. Paper orders settle only in the local ARRAKIS sandbox; no exchange orders are sent.</p>
     </section>
   )
 }
@@ -1547,7 +1564,11 @@ function TradePage({ account, setAccount, prices, priceStatus }) {
 
   return (
     <div className="page-stack sandbox-page">
-      <section className="welcome-row"><div><div className="eyebrow">ARRAKIS SIMULATED EXCHANGE</div><h1>Trade<span className="accent-period">.</span></h1><p className="muted">Trade ETH, SOL and BNB perpetuals with test balances and live public reference prices.</p></div><div className="sandbox-status"><span className="sandbox-status-dot" /> ARRAKIS SANDBOX <span className="sandbox-muted-pill">{priceStatus}</span></div></section>
+      <section className="welcome-row"><div><div className="eyebrow">ARRAKIS MAINNET MIRROR</div><h1>Trade<span className="accent-period">.</span></h1><p className="muted">Live mainnet perpetual markets and venue depth. Orders, fills, balances and P&amp;L remain simulated.</p></div><div className="sandbox-status"><span className="sandbox-status-dot" /> PAPER EXECUTION <span className="sandbox-muted-pill">{priceStatus}</span></div></section>
+      <section className="sandbox-environment-banner" role="note">
+        <div><span className="sandbox-label">ENVIRONMENT</span><strong>Mainnet market data · Simulated execution</strong><p>Compare real public perpetual markets while safely testing the ARRAKIS order, risk and portfolio workflow. No wallet connection or exchange order submission.</p></div>
+        <span className="sandbox-environment-lock">EXECUTION DISABLED</span>
+      </section>
 
       <>
       <div className="sandbox-market-tabs" aria-label="Choose perpetual market">
@@ -1815,7 +1836,7 @@ function FoundationPage({ page, data, account, setAccount, prices, onNavigate })
   }
 
   if (page === 'intelligence') {
-    return <div className="page-stack sandbox-page"><section className="welcome-row"><div><div className="eyebrow">{config.eyebrow}</div><h1>Intelligence<span className="accent-period">.</span></h1><p className="muted">AI-assisted DeFi analysis, execution-risk review and current market context.</p></div><span className="tag">AI ANALYST + MARKET DATA</span></section><AssistantConsole account={account} prices={prices} priceStatus={data.marketStatus} data={data} /><section className="sandbox-portfolio-summary">{assets.slice(1).map((asset) => <article className="panel" key={asset}><span className="sandbox-label">{asset}/USDC</span><strong>{prices[asset]?.price ? usd(prices[asset].price) : '—'}</strong><span className={Number(prices[asset]?.change24h) >= 0 ? 'positive' : 'negative'}>{prices[asset] ? `${Number(prices[asset].change24h) >= 0 ? '+' : ''}${money(prices[asset].change24h, 2)}% (24h)` : 'Loading'}</span></article>)}</section><section className="panel sandbox-orders-panel"><div className="sandbox-section-heading"><div><div className="eyebrow">TRADING GUARDRAILS</div><h2>How ARRAKIS operates</h2></div><span className="sandbox-muted-pill">Simulation only</span></div><div className="sandbox-intel-grid"><div><span>Execution</span><strong>Local simulation</strong></div><div><span>Balances</span><strong>Test assets</strong></div><div><span>Market prices</span><strong>Public references</strong></div><div><span>AI Analyst</span><strong>Read-only</strong></div></div><p className="sandbox-footnote">Orders and swaps update your ARRAKIS sandbox account only. No wallet connection, venue order submission or blockchain transaction is part of this release.</p></section></div>
+    return <div className="page-stack sandbox-page"><section className="welcome-row"><div><div className="eyebrow">{config.eyebrow}</div><h1>Intelligence<span className="accent-period">.</span></h1><p className="muted">Cross-venue perpetual comparison, paper-fill estimates and AI-assisted risk review.</p></div><span className="tag">MAINNET DATA · NO LIVE ORDERS</span></section><RouteComparison /><AssistantConsole account={account} prices={prices} priceStatus={data.marketStatus} data={data} /><section className="sandbox-portfolio-summary">{assets.slice(1).map((asset) => <article className="panel" key={asset}><span className="sandbox-label">{asset}/USDC</span><strong>{prices[asset]?.price ? usd(prices[asset].price) : '—'}</strong><span className={Number(prices[asset]?.change24h) >= 0 ? 'positive' : 'negative'}>{prices[asset] ? `${Number(prices[asset].change24h) >= 0 ? '+' : ''}${money(prices[asset].change24h, 2)}% (24h)` : 'Loading'}</span></article>)}</section><section className="panel sandbox-orders-panel"><div className="sandbox-section-heading"><div><div className="eyebrow">TRADING GUARDRAILS</div><h2>How ARRAKIS operates</h2></div><span className="sandbox-muted-pill">Simulation only</span></div><div className="sandbox-intel-grid"><div><span>Execution</span><strong>Local simulation</strong></div><div><span>Balances</span><strong>Test assets</strong></div><div><span>Market prices</span><strong>Public references</strong></div><div><span>AI Analyst</span><strong>Read-only</strong></div></div><p className="sandbox-footnote">Orders and swaps update your ARRAKIS sandbox account only. No wallet connection, venue order submission or blockchain transaction is part of this release.</p></section></div>
   }
 
   return <div className="page-stack sandbox-page"><section className="welcome-row"><div><div className="eyebrow">{config.eyebrow}</div><h1>{config.title}<span className="accent-period">.</span></h1><p className="muted">{config.description}</p></div><button type="button" className="button button-primary" onClick={() => onNavigate('trade')}>Open trading terminal ↗</button></section></div>

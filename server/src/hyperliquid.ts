@@ -1,7 +1,7 @@
 
 import type { PerpetualMarket } from "./types.js";
 
-const API_URL = "https://api.hyperliquid-testnet.xyz/info";
+const API_URL = "https://api.hyperliquid.xyz/info";
 
 type AssetMeta = {
   universe: Array<{
