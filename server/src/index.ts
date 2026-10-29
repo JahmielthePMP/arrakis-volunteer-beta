@@ -583,7 +583,9 @@ async function getDydxOrderBook(
   return summarizeOrderBook(
     parseOrderBookLevels(data.bids, "price", "size"),
     parseOrderBookLevels(data.asks, "price", "size"),
-    new Date(receivedAtMs).toISOString(),
+    // The dYdX REST order-book response has no verified snapshot timestamp.
+    // Keep observedAt null rather than presenting local receipt time as source time.
+    null,
     "local_receipt",
     { receivedAtMs, httpResponseDateMs, snapshotAgeMs: null },
   );
@@ -1322,15 +1324,30 @@ app.post("/api/risk-assessment", async (req, res) => {
     return [{ venue: assessment.venue, totalCashflow: Number(estimate.totalCashflow), estimate }];
   }).filter((entry) => Number.isFinite(entry.totalCashflow));
 
+  // A cost comparison is meaningful only across the same market environment.
+  // This MVP intentionally uses Hyperliquid testnet and dYdX mainnet; their
+  // prices/depth are not comparable for route selection. Keep each venue's
+  // standalone assessment, but refuse cross-network ranking until environments
+  // are aligned explicitly.
+  const assessmentNetworks = [...new Set(assessments.map((assessment) => assessment.network))];
+  const networkMismatch = assessmentNetworks.length > 1;
+  if (networkMismatch) {
+    warnings.push(`Venue comparison withheld: the active adapters span different networks (${assessmentNetworks.join(", ")}). Align venue environments before comparing costs or recommending a route.`);
+  }
+
   let comparison: Record<string, unknown> = {
     comparable: false,
     decisionReady: false,
     dataQualityStatus: "not_comparable",
     candidates: fullyFilledEstimates.map(({ venue }) => venue),
-    reason: "A cost comparison requires at least two valid, fully filled estimates using the same instrument, side, size and assumed fee.",
+    reason: networkMismatch
+      ? "The active venue adapters use different networks. Cross-network prices and depth are not eligible for a route comparison."
+      : "A cost comparison requires at least two valid, fully filled estimates using the same instrument, side, size and assumed fee.",
+    networkMismatch,
+    networks: assessmentNetworks,
   };
 
-  if (fullyFilledEstimates.length >= 2) {
+  if (fullyFilledEstimates.length >= 2 && !networkMismatch) {
     const ascending = [...fullyFilledEstimates].sort((a, b) => a.totalCashflow - b.totalCashflow);
     const best = side === "buy" ? ascending[0] : ascending[ascending.length - 1];
     const minimum = ascending[0].totalCashflow;
