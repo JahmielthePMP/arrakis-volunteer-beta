@@ -497,7 +497,7 @@ async function getHyperliquidOrderBook(
   coin: string,
 ): Promise<OrderBookMetrics> {
   const response = await fetch(
-    "https://api.hyperliquid-testnet.xyz/info",
+    "https://api.hyperliquid.xyz/info",
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -733,10 +733,10 @@ const VENUE_ADAPTERS: Record<string, VenueAdapter> = {
   hyperliquid: {
     id: "hyperliquid",
     name: "Hyperliquid",
-    chainId: "hyperliquid-testnet",
+    chainId: "hyperliquid-mainnet",
     chainName: "Hyperliquid",
     chainFamily: "app-specific L1",
-    network: "testnet",
+    network: "mainnet",
     product: "perpetuals",
     supportStatus: "active",
     executionEnabled: false,
@@ -744,7 +744,7 @@ const VENUE_ADAPTERS: Record<string, VenueAdapter> = {
       const markets = await getHyperliquidMarkets();
       return markets.map((market) => ({
         venue: "hyperliquid",
-        network: "testnet",
+        network: "mainnet",
         symbol: market.symbol,
         baseAsset: market.baseAsset,
         quoteAsset: market.quoteAsset ?? "USD",
